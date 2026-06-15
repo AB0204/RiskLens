@@ -17,9 +17,13 @@ data/raw/*.csv
 data/processed/
 
 # Models
-models/
+data/models/
+mlruns/
 *.pkl
 *.joblib
+!src/models/
+!src/models/**
+
 
 # Jupyter
 .ipynb_checkpoints/

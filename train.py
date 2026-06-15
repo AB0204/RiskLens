@@ -39,6 +39,12 @@ def main():
     X_val_transformed = feature_engineer.transform(X_val)
     X_test_transformed = feature_engineer.transform(X_test)
     
+    import joblib
+    local_dir = Path("data/models")
+    local_dir.mkdir(parents=True, exist_ok=True)
+    joblib.dump(feature_engineer, local_dir / "feature_engineer.joblib")
+    logger.info("Saved fitted feature engineer to data/models/feature_engineer.joblib")
+    
     logger.info(f"Features after engineering: {X_train_transformed.shape[1]}")
     
     # Train XGBoost model

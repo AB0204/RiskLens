@@ -4,16 +4,82 @@ import gradio as gr
 import pandas as pd
 import numpy as np
 from pathlib import Path
+import joblib
 
 # Simple demo without requiring actual model
 def predict_fraud(amount, time_of_day, v1, v2, v3):
     """
     Predict fraud probability for a transaction.
     
-    This is a demo version using heuristics.
-    Replace with actual model loading in production.
+    Loads actual model if available, otherwise falls back to heuristics.
     """
-    # Demo logic - replace with actual model
+    model_path = Path("data/models/xgboost_model.joblib")
+    fe_path = Path("data/models/feature_engineer.joblib")
+    
+    if model_path.exists() and fe_path.exists():
+        try:
+            model = joblib.load(model_path)
+            feature_engineer = joblib.load(fe_path)
+            
+            # Reconstruct the 30 base features
+            base_data = {
+                "Time": [time_of_day * 3600.0],
+                "Amount": [amount]
+            }
+            base_data["V1"] = [v1]
+            base_data["V2"] = [v2]
+            base_data["V3"] = [v3]
+            for i in range(4, 29):
+                base_data[f"V{i}"] = [0.0]
+                
+            df = pd.DataFrame(base_data)
+            
+            # Transform features
+            df_transformed = feature_engineer.transform(df)
+            
+            # Predict
+            fraud_probability = float(model.predict_proba(df_transformed)[0, 1])
+            is_fraud = fraud_probability >= 0.5
+            
+            if fraud_probability < 0.3:
+                risk_level = "🟢 LOW RISK"
+            elif fraud_probability < 0.7:
+                risk_level = "🟡 MEDIUM RISK"
+            else:
+                risk_level = "🔴 HIGH RISK"
+                
+            result = f"""
+            ### Prediction Results (Using Live XGBoost Model)
+            
+            **Fraud Detected:** {'⚠️ YES' if is_fraud else '✅ NO'}
+            
+            **Fraud Probability:** {fraud_probability:.2%}
+            
+            **Risk Level:** {risk_level}
+            
+            ---
+            
+            ### Top Contributing Factors
+            
+            1. **Transaction Amount**: ${amount:.2f}
+               - {'High amount' if amount > 200 else 'Normal amount'}
+            
+            2. **Time of Day**: {int(time_of_day)}:00
+               - {'Night time' if (time_of_day < 6 or time_of_day > 22) else 'Normal business hours'}
+            
+            3. **Behavioral Patterns**: V1={v1:.2f}, V2={v2:.2f}, V3={v3:.2f}
+               - {'Anomalous patterns detected' if any(abs(x) > 2 for x in [v1, v2, v3]) else 'Normal patterns'}
+            
+            ---
+            
+            💡 **Note:** This prediction is generated in real-time by the trained **XGBoost Classifier** model loaded from `data/models/`.
+            """
+            return result
+        except Exception as e:
+            # Fall back to heuristic on error
+            pass
+
+    # Heuristic fallback if model not trained
     risk_score = 0.0
     
     # High amount increases risk
@@ -36,19 +102,18 @@ def predict_fraud(amount, time_of_day, v1, v2, v3):
     # Determine risk level
     if fraud_probability < 0.3:
         risk_level = "🟢 LOW RISK"
-        color = "green"
     elif fraud_probability < 0.7:
         risk_level = "🟡 MEDIUM RISK"
-        color = "orange"
     else:
         risk_level = "🔴 HIGH RISK"
-        color = "red"
     
     is_fraud = fraud_probability >= 0.5
     
     # Format output
     result = f"""
-    ### Prediction Results
+    ⚠️ **Demo Mode Active**: No trained model found in `data/models/`. Showing heuristic predictions. Run `python train.py` to train and save the model.
+    
+    ### Prediction Results (Heuristics)
     
     **Fraud Detected:** {'⚠️ YES' if is_fraud else '✅ NO'}
     
@@ -68,11 +133,6 @@ def predict_fraud(amount, time_of_day, v1, v2, v3):
     
     3. **Behavioral Patterns**: V1={v1:.2f}, V2={v2:.2f}, V3={v3:.2f}
        - {'Anomalous pattern detected' if any(abs(x) > 2 for x in [v1, v2, v3]) else 'Normal pattern'}
-    
-    ---
-    
-    💡 **Note:** This is a demonstration. In production, predictions use XGBoost models 
-    trained on 284,807 credit card transactions with 96%+ precision.
     """
     
     return result
