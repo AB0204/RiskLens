@@ -1,6 +1,7 @@
 """FastAPI application for FraudGuard fraud detection."""
 
 import pandas as pd
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 import joblib
@@ -16,14 +17,6 @@ from ..monitoring.metrics import (
     predictions_total,
     CONTENT_TYPE_LATEST
 )
-from prometheus_client import CONTENT_TYPE_LATEST
-
-# Initialize FastAPI app
-app = FastAPI(
-    title=settings.api_title,
-    version=settings.api_version,
-    description="Real-time fraud detection API with ML-powered risk assessment"
-)
 
 # Global model instance
 model = None
@@ -31,28 +24,44 @@ feature_engineer = None
 explainer = None
 
 
-@app.on_event("startup")
-async def load_model():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     """Load model on startup."""
     global model, feature_engineer, explainer
-    
+
+    model_path = Path("data/models/xgboost_model.joblib")
+    fe_path = Path("data/models/feature_engineer.joblib")
+
     try:
-        # In production, load from MLflow model registry
-        # For now, using placeholder
-        logger.info("Model loading: Using trained model from MLflow...")
-        logger.info("API ready for predictions")
-        
-        # Initialize explainer if model is loaded
+        if model_path.exists():
+            model = joblib.load(model_path)
+            logger.info(f"Model loaded from {model_path}")
+        if fe_path.exists():
+            feature_engineer = joblib.load(fe_path)
+            logger.info(f"Feature engineer loaded from {fe_path}")
+
         if model is not None:
-            feature_names = list(range(30))  # Placeholder
+            feature_names = list(range(30))
             explainer = ModelExplainer(model, feature_names)
             logger.info("SHAP explainer initialized")
             update_model_status(True)
         else:
+            logger.warning("No model file found — API will return 503 on /predict")
             update_model_status(False)
     except Exception as e:
         logger.error(f"Failed to load model: {e}")
         update_model_status(False)
+
+    yield
+
+
+# Initialize FastAPI app
+app = FastAPI(
+    title=settings.api_title,
+    version=settings.api_version,
+    description="Real-time fraud detection API with ML-powered risk assessment",
+    lifespan=lifespan,
+)
 
 
 @app.get("/", tags=["Health"])
@@ -96,7 +105,7 @@ async def predict_fraud(transaction: TransactionRequest):
             df = feature_engineer.transform(df)
         
         # Get prediction
-        fraud_prob = model.predict_proba(df)[0]
+        fraud_prob = model.predict_proba(df)[0, 1]
         is_fraud = fraud_prob >= settings.threshold
         
         # Determine risk score
@@ -139,8 +148,8 @@ async def predict_batch(transactions: list[TransactionRequest]):
             df = feature_engineer.transform(df)
         
         # Get predictions
-        fraud_probs = model.predict_proba(df)
-        
+        fraud_probs = model.predict_proba(df)[:, 1]
+
         results = []
         for prob in fraud_probs:
             is_fraud = prob >= settings.threshold
